@@ -1,51 +1,88 @@
-# Minimal Evolution System for Hermes
+# Minimal Evolution System
 
-Minimal Evolution System is a small local learning loop for Hermes Agent.
+让 Hermes Agent 记住“做事经验”的一个小系统。
 
-It does not fine-tune model weights. It gives Hermes a lightweight memory layer:
-after a task finishes, Hermes can extract one reusable operating rule, store it in
-SQLite, and retrieve relevant rules before the next similar task.
+很多人第一次用 Agent 时会遇到同一个问题：它这次被你纠正了，下次却又犯同样的错。比如你提醒它“读论文前先确认标题和作者”，这轮它照做了；过几天你再让它读另一篇论文，它可能又先猜、再补救。
 
-The goal is simple:
+Minimal Evolution System 想解决的就是这个问题。
 
-> Stop repeating the same mistake. Keep useful task experience in a local, auditable database.
+它不训练模型，也不改变模型参数。它只是给 Hermes 加一层很朴素的“经验本”：每次任务结束后，让 Agent 总结一条以后还会用得上的规则，存到本地 SQLite 数据库里；下次遇到相似任务时，再把相关规则提前拿出来提醒它。
 
-## What You Get
+一句话：
 
-After installation, Hermes gains:
+> 不是让模型变成另一个模型，而是让它少重复同一种错误。
 
-- `/evo-report`: show how many reusable rules have been learned.
-- `/evo-report-json`: same report as JSON.
-- `/evo-backup`: back up the SQLite memory database.
-- `/evo-clean`: remove very low-confidence rules.
-- `/evo-reconcile`: merge similar rules and clean up duplicates.
-- `pre_llm_call` hook: retrieve relevant rules before the model answers.
-- `post_llm_call` hook: audit the answer after the task and store a future-facing rule.
+## 适合谁
 
-The system stores data under:
+这个项目适合已经在使用 Hermes Agent，但希望它更稳定、更像“越用越顺手”的开发者。
+
+你不需要懂机器学习，也不需要训练模型。你只需要知道：
+
+- Hermes 是你正在用的 Agent。
+- 这个项目会给 Hermes 增加几个本地脚本。
+- 它会把一些可复用经验存到你自己的电脑里。
+- 你可以随时查看、备份、清理这些经验。
+
+它尤其适合这些场景：
+
+- 你经常让 Agent 写代码、读文档、读论文、查资料。
+- 你发现 Agent 经常在同类任务里重复犯错。
+- 你不想每次都重新提醒“不要这样，要那样”。
+- 你想要一个能看见、能备份、能删除的本地经验库。
+
+## 它解决什么问题
+
+普通 Agent 的一次对话通常是短期记忆。你在这轮对话里纠正它，它能听懂；但这个纠正很难稳定进入下一次任务。
+
+Minimal Evolution System 做了三件小事：
+
+1. 任务开始前，先查本地经验库，看有没有相关规则。
+2. 任务结束后，回看这次任务，提炼一条可复用规则。
+3. 用 `/evo-report` 让你看到系统到底记住了什么。
+
+举个例子。
+
+你让 Agent 读一篇 arXiv 论文。第一次它没有确认论文标题，直接根据链接猜内容，结果猜错了。你纠正它。
+
+这套系统会尝试沉淀出类似规则：
 
 ```text
-~/.hermes/evolution-system/
-  memory.db
-  session_state/
-  backups/
-  logs/
+在阅读 arXiv/PDF 论文时，应先确认标题、作者和年份，再做主题判断；若用户只要求泛泛介绍论文库，此规则不适用。
 ```
 
-## Requirements
+下次你再让它读论文，这条规则会提前进入上下文，提醒它别再跳过元数据确认。
 
-- Linux or macOS shell environment.
-- Hermes Agent installed and working.
-- Python 3.10+.
-- SQLite support in Python, which is included in normal Python builds.
-- A local or remote OpenAI-compatible model endpoint configured in Hermes.
+## 它不是什么
 
-Optional but recommended:
+先说清楚边界很重要。
 
-- `PyYAML` for automatic config editing in `install.sh`.
-- Ollama or another local model server if you want the system to run fully locally.
+Minimal Evolution System 不是：
 
-Check quickly:
+- 不是模型微调。
+- 不是向量数据库。
+- 不是知识库问答系统。
+- 不是云同步服务。
+- 不是让 Agent 自动变聪明的魔法。
+
+它更像一个很小的“经验账本”：
+
+- 记录规则。
+- 按任务匹配规则。
+- 根据使用结果调整规则置信度。
+- 提供报告让人检查。
+
+这也是它的优点：简单、本地、可读、可删。
+
+## 安装前准备
+
+你需要：
+
+- 已安装并能正常运行 Hermes Agent。
+- 系统里有 `python3`。
+- Python 能使用 SQLite，普通 Python 一般都自带。
+- 推荐有 `PyYAML`，这样安装脚本可以自动修改 Hermes 配置。
+
+检查命令：
 
 ```bash
 hermes --version
@@ -54,567 +91,197 @@ python3 -c "import sqlite3; print('sqlite ok')"
 python3 -c "import yaml; print('yaml ok')"
 ```
 
-If `yaml ok` fails, you can still install manually using the config snippet in
-`examples/config-snippet.yaml`.
+如果最后一条失败，也可以安装，只是需要手动复制配置片段。
 
-## Quick Install
+## 快速安装
 
-Clone or copy this repository, then run:
+进入项目目录：
 
 ```bash
 cd minimal-evolution-system
+```
+
+运行安装脚本：
+
+```bash
 ./install.sh
 ```
 
-The installer will:
+安装脚本会做这些事：
 
-1. Copy the skill into `~/.hermes/skills/minimal-evolution-system/`.
-2. Copy hooks into `~/.hermes/agent-hooks/`.
-3. Initialize `~/.hermes/evolution-system/memory.db`.
-4. Back up your Hermes config.
-5. Add quick commands and hooks to `~/.hermes/config.yaml`.
+1. 把 skill 复制到 `~/.hermes/skills/minimal-evolution-system/`。
+2. 把两个 hook 脚本复制到 `~/.hermes/agent-hooks/`。
+3. 创建本地数据库 `~/.hermes/evolution-system/memory.db`。
+4. 自动备份你的 Hermes 配置文件。
+5. 在 Hermes 配置里加入 `/evo-report` 等命令。
+6. 在 Hermes 配置里加入任务前后自动运行的 hook。
 
-Then verify:
+安装后运行：
 
 ```bash
 hermes hooks doctor
 ```
 
-If you are installing on a headless machine or you already trust these hooks, use:
+这个命令会检查 hook 是否存在、是否被批准、是否能正常运行。
+
+如果你在服务器上安装，或者你明确信任这些 hook，也可以直接运行：
 
 ```bash
 ./install.sh --accept-hooks
 ```
 
-That runs:
+## 安装后怎么确认成功
+
+打开 Hermes：
 
 ```bash
-hermes --accept-hooks hooks doctor
+hermes
 ```
 
-## Install Into Another Hermes Profile
+输入：
 
-Hermes supports isolated profiles through `HERMES_HOME`.
-
-To install into a custom profile:
-
-```bash
-HERMES_HOME=/path/to/.hermes ./install.sh
+```text
+/evo-report
 ```
 
-To use a custom config path:
+第一次运行时，规则数可能是 0。这是正常的。
 
-```bash
-HERMES_CONFIG=/path/to/config.yaml ./install.sh
+你会看到类似：
+
+```text
+DB: /home/user/.hermes/evolution-system/memory.db
+总规则数: 0
+高质量规则数(confidence>0.7): 0
+低质量待淘汰规则数(confidence<0.1): 0
+近7天新增规则数: 0
+
+领域分布:
+
+复用最多的规则:
 ```
 
-## Copy Files Only
+再做一个小任务，然后过一会儿再运行 `/evo-report`，就可以看到是否有规则沉淀。
 
-If you want to inspect the config before editing it:
+日志位置：
 
-```bash
-./install.sh --no-config
+```text
+~/.hermes/evolution-system/logs/auto_critique.log
 ```
 
-Then manually merge `examples/config-snippet.yaml` into your Hermes config.
+## 日常怎么用
 
-## Manual Install
+大多数时候你不需要特别操作。
 
-Copy files:
+正常和 Hermes 对话即可。系统会在后台做两件事：
 
-```bash
-mkdir -p ~/.hermes/skills/minimal-evolution-system/scripts
-mkdir -p ~/.hermes/agent-hooks
+- 任务开始前：找相关历史规则。
+- 任务结束后：尝试总结新的规则。
 
-cp SKILL.md ~/.hermes/skills/minimal-evolution-system/SKILL.md
-cp scripts/evolution_memory.py ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py
-cp hooks/evolution_pre_llm.py ~/.hermes/agent-hooks/evolution_pre_llm.py
-cp hooks/evolution_post_llm.py ~/.hermes/agent-hooks/evolution_post_llm.py
+你只需要偶尔看报告：
 
-chmod +x ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py
-chmod +x ~/.hermes/agent-hooks/evolution_pre_llm.py
-chmod +x ~/.hermes/agent-hooks/evolution_post_llm.py
+```text
+/evo-report
 ```
 
-Initialize the database:
+常用命令：
 
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py init-db
+```text
+/evo-report       查看当前规则统计
+/evo-report-json  输出 JSON 版本报告
+/evo-backup       备份数据库
+/evo-clean        删除低置信度规则
+/evo-reconcile    合并相似规则
 ```
 
-Add this to `~/.hermes/config.yaml`:
+## 一个完整例子
 
-```yaml
-quick_commands:
-  evo-report:
-    type: exec
-    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report
-  evo-report-json:
-    type: exec
-    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report --json
-  evo-backup:
-    type: exec
-    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py backup
-  evo-clean:
-    type: exec
-    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py cleanup
-  evo-reconcile:
-    type: exec
-    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py reconcile
+假设你经常让 Agent 读论文。
 
-hooks:
-  pre_llm_call:
-    - command: python3 ~/.hermes/agent-hooks/evolution_pre_llm.py
-      timeout: 30
-  post_llm_call:
-    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
-      timeout: 90
+你第一次发现它犯错：
+
+```text
+你刚才没有确认论文标题，直接根据 arXiv 链接猜论文内容了。
+以后读论文前先确认标题、作者、年份，再开始分析。
 ```
 
-Then verify:
+任务结束后，系统会让模型从这次过程里提炼一条规则。它可能存成：
 
-```bash
-hermes hooks doctor
+```text
+在阅读论文任务中，应先确认标题、作者、年份和来源，再做主题判断；若用户只要求查找论文链接，此规则不适用。
 ```
 
-## How It Works
+下次你说：
 
-The system has three parts.
+```text
+用 ljg-paper 阅读 https://arxiv.org/abs/xxxx.xxxxx
+```
 
-### 1. SQLite Rule Store
+系统会在任务开始前查到这条规则，并提醒 Agent。
 
-Rules are stored in:
+你不需要再重复提醒。
+
+## 这个系统怎么工作
+
+如果你只想使用，可以跳过这一节。
+
+项目由三部分组成。
+
+### 1. 经验数据库
+
+数据库是一个本地 SQLite 文件：
 
 ```text
 ~/.hermes/evolution-system/memory.db
 ```
 
-Each rule has:
+里面主要保存这些字段：
 
-- `domain_tag`: broad category such as `coding`, `research`, `writing`, `tool_use`, `ops`.
-- `rule_learned`: the reusable operating rule.
-- `what_worked`: optional short note about what worked.
-- `what_failed`: optional short note about what failed.
-- `confidence`: score from `0.0` to `1.0`.
-- `use_count`: how often the rule was retrieved.
-- `created_at` and `last_used`.
+- `domain_tag`：规则属于哪个领域，比如 `coding`、`research`、`writing`。
+- `rule_learned`：真正要复用的规则。
+- `what_worked`：这次什么做法有效。
+- `what_failed`：这次哪里失败了。
+- `confidence`：规则置信度，范围是 0 到 1。
+- `use_count`：这条规则被取出来用过几次。
 
-The schema is created automatically by:
+### 2. 任务开始前的 hook
 
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py init-db
-```
-
-### 2. Pre-LLM Hook
-
-Before Hermes calls the model, `hooks/evolution_pre_llm.py` receives the current task.
-
-It runs:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py retrieve \
-  --task "<current user task>" \
-  --session-id "<hermes session id>" \
-  --json
-```
-
-The retrieved rules are injected into the model context as guidance.
-
-Important behavior:
-
-- It skips slash commands.
-- It fails open. If the database or script has a problem, it returns `{}` and Hermes continues normally.
-- It only injects rules that match the current task by domain or keywords.
-- Current user instructions still take priority over historical rules.
-
-### 3. Post-LLM Hook
-
-After Hermes finishes, `hooks/evolution_post_llm.py` receives:
-
-- the user message
-- the assistant response
-- the session id
-- task success metadata when available
-
-It runs an automatic critique:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py auto-critique \
-  --user-message "<task>" \
-  --assistant-response "<answer>" \
-  --session-id "<session id>" \
-  --timeout 120 \
-  --json
-```
-
-The critique model must output a JSON rule. The system then:
-
-1. rejects weak rules
-2. reviews rule quality
-3. merges near-duplicates
-4. adjusts confidence for previously retrieved rules
-5. writes the result to SQLite
-6. logs the audit under `~/.hermes/evolution-system/logs/auto_critique.log`
-
-## Commands
-
-### Report
-
-```bash
-/evo-report
-```
-
-Equivalent command:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report
-```
-
-Example output:
-
-```text
-DB: /home/user/.hermes/evolution-system/memory.db
-总规则数: 5
-高质量规则数(confidence>0.7): 0
-低质量待淘汰规则数(confidence<0.1): 0
-近7天新增规则数: 5
-
-领域分布:
-- research: 3 条，平均置信度 0.6333
-- coding: 1 条，平均置信度 0.5
-
-复用最多的规则:
-- [id=4] [domain=research] use_count=4 confidence=0.7: ...
-```
-
-### JSON Report
-
-```bash
-/evo-report-json
-```
-
-Equivalent command:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report --json
-```
-
-Use this when you want to build dashboards or inspect the data programmatically.
-
-### Backup
-
-```bash
-/evo-backup
-```
-
-Equivalent command:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py backup
-```
-
-Backups are written to:
-
-```text
-~/.hermes/evolution-system/backups/
-```
-
-### Cleanup
-
-```bash
-/evo-clean
-```
-
-Equivalent command:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py cleanup
-```
-
-This deletes rules with `confidence < 0.1`.
-
-### Reconcile
-
-```bash
-/evo-reconcile
-```
-
-Equivalent command:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py reconcile
-```
-
-This merges similar rules and removes stale rules.
-
-## Direct CLI Usage
-
-Retrieve rules:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py retrieve \
-  --task "debug a failing pytest test" \
-  --json
-```
-
-Store a critique manually:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py store-critique \
-  --task "debug a failing pytest test" \
-  --result "fixed fixture setup and reran focused test" \
-  --success true \
-  --critique-json '{"rule_learned":"在调试失败测试时，应先复现最小失败用例再扩大测试范围；若失败无法稳定复现，此规则不适用。","domain_tag":"coding","confidence_delta":0.1}'
-```
-
-Run auto-critique manually:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py auto-critique \
-  --user-message "debug a failing pytest test" \
-  --assistant-response "fixed the fixture and verified the test" \
-  --success true \
-  --json
-```
-
-## Model Selection
-
-`auto-critique` uses the model configured in Hermes by default.
-
-The script tries to read:
-
-```yaml
-model:
-  default: ...
-providers:
-  ...
-```
-
-from:
-
-```text
-${HERMES_HOME:-~/.hermes}/config.yaml
-```
-
-You can override it per command:
-
-```bash
-python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py auto-critique \
-  --user-message "..." \
-  --assistant-response "..." \
-  --model "qwen3:8b" \
-  --base-url "http://127.0.0.1:11434/v1" \
-  --json
-```
-
-You can also set environment variables:
-
-```bash
-export EVOLUTION_MODEL=qwen3:8b
-export EVOLUTION_BASE_URL=http://127.0.0.1:11434/v1
-```
-
-For local models, use a small or medium model if speed matters. The post hook runs after each completed task, so a very large local model can make Hermes feel slow.
-
-## Security Model
-
-This project adds shell hooks to Hermes.
-
-That means Hermes will run local Python scripts on `pre_llm_call` and `post_llm_call`.
-
-Before approving hooks, inspect:
+文件：
 
 ```text
 hooks/evolution_pre_llm.py
-hooks/evolution_post_llm.py
-scripts/evolution_memory.py
 ```
 
-Then run:
+它会在 Hermes 调用模型前运行。
 
-```bash
-hermes hooks doctor
-```
+它做的事很简单：
 
-The hooks are intentionally local:
+1. 读取当前用户任务。
+2. 去 SQLite 里找相关规则。
+3. 把匹配到的规则注入到本轮上下文。
 
-- They write to `~/.hermes/evolution-system/`.
-- They do not upload the SQLite database.
-- They call your configured model endpoint for auto-critique.
-- They fail open so Hermes can continue if the evolution system has an error.
+如果它失败了，会返回空结果，不影响 Hermes 正常回答。
 
-The post hook sends the task and final answer to your configured model endpoint.
-If your endpoint is remote, that text leaves your machine. If that matters, use a local model.
+### 3. 任务结束后的 hook
 
-## Privacy
-
-The SQLite database may contain:
-
-- excerpts of task descriptions
-- short result summaries
-- reusable rules inferred from work
-- small notes about what worked or failed
-
-Do not publish `memory.db`.
-
-The `.gitignore` excludes common SQLite database files, but check before pushing:
-
-```bash
-find . -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3'
-```
-
-## Performance Notes
-
-The pre hook is usually fast because it only queries SQLite.
-
-The post hook can be slower because it may call a model twice:
-
-1. generate critique
-2. review candidate rule
-
-If tasks feel slow, use one of these options:
-
-1. Use a smaller model for `EVOLUTION_MODEL`.
-2. Increase the hook timeout if the model is slow.
-3. Disable the post hook and use manual `store-critique`.
-4. Keep only `/evo-report` and manual commands.
-
-To disable only the post hook, remove this section from Hermes config:
-
-```yaml
-hooks:
-  post_llm_call:
-    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
-      timeout: 90
-```
-
-## Troubleshooting
-
-### `/evo-report` does not exist
-
-Check config:
-
-```bash
-hermes config path
-hermes config show | grep -n "evo-report"
-```
-
-If missing, merge `examples/config-snippet.yaml` into your config or rerun:
-
-```bash
-./install.sh
-```
-
-### Hooks are not approved
-
-Run:
-
-```bash
-hermes hooks doctor
-```
-
-For non-interactive install:
-
-```bash
-hermes --accept-hooks hooks doctor
-```
-
-### Hook says command changed
-
-Hermes tracks hook script contents for safety. If you edited a hook after approval, re-approve it:
-
-```bash
-hermes hooks doctor
-```
-
-### Post hook times out
-
-Use a smaller critique model:
-
-```bash
-export EVOLUTION_MODEL=qwen3:8b
-```
-
-Or increase the timeout in config:
-
-```yaml
-hooks:
-  post_llm_call:
-    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
-      timeout: 180
-```
-
-### Rules are too generic
-
-Run:
-
-```bash
-/evo-reconcile
-```
-
-Then inspect:
-
-```bash
-/evo-report
-```
-
-The system already rejects many low-quality rules, but local models can still produce vague rules. Better critique models produce better memory.
-
-### Database looks wrong
-
-Back up first:
-
-```bash
-/evo-backup
-```
-
-Then inspect directly:
-
-```bash
-sqlite3 ~/.hermes/evolution-system/memory.db '.tables'
-sqlite3 ~/.hermes/evolution-system/memory.db 'select id, domain_tag, confidence, rule_learned from memories order by id desc limit 10;'
-```
-
-## Uninstall
-
-Remove the installed files:
-
-```bash
-rm -rf ~/.hermes/skills/minimal-evolution-system
-rm -f ~/.hermes/agent-hooks/evolution_pre_llm.py
-rm -f ~/.hermes/agent-hooks/evolution_post_llm.py
-```
-
-Remove these config entries from `~/.hermes/config.yaml`:
-
-```yaml
-quick_commands:
-  evo-report:
-  evo-report-json:
-  evo-backup:
-  evo-clean:
-  evo-reconcile:
-
-hooks:
-  pre_llm_call:
-    - command: python3 ~/.hermes/agent-hooks/evolution_pre_llm.py
-  post_llm_call:
-    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
-```
-
-The data remains at:
+文件：
 
 ```text
-~/.hermes/evolution-system/
+hooks/evolution_post_llm.py
 ```
 
-Delete it only if you no longer need the learned rules:
+它会在 Hermes 完成一次回答后运行。
 
-```bash
-rm -rf ~/.hermes/evolution-system
-```
+它做的事是：
 
-## Project Layout
+1. 读取用户任务和最终回答。
+2. 可选地读取本轮过程摘要。
+3. 调用你配置的模型做一次简短审计。
+4. 提炼一条未来可复用规则。
+5. 存入 SQLite。
+
+这一步可能会慢一点，因为它需要再调用一次模型。
+
+## 文件结构
 
 ```text
 minimal-evolution-system/
@@ -632,56 +299,322 @@ minimal-evolution-system/
   .gitignore
 ```
 
-## Design Boundaries
+## 手动安装
 
-This system is intentionally small.
+如果你不想让安装脚本修改配置，可以手动安装。
 
-It does not:
-
-- fine-tune or modify model weights
-- replace Hermes memory
-- guarantee task quality
-- decide truth by itself
-- sync memory to a cloud service
-- publish your local database
-
-It does:
-
-- store reusable rules
-- retrieve relevant rules before a task
-- update confidence scores
-- produce a report
-- keep the implementation inspectable
-
-## Recommended First Test
-
-After install:
+复制文件：
 
 ```bash
-hermes
+mkdir -p ~/.hermes/skills/minimal-evolution-system/scripts
+mkdir -p ~/.hermes/agent-hooks
+
+cp SKILL.md ~/.hermes/skills/minimal-evolution-system/SKILL.md
+cp scripts/evolution_memory.py ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py
+cp hooks/evolution_pre_llm.py ~/.hermes/agent-hooks/evolution_pre_llm.py
+cp hooks/evolution_post_llm.py ~/.hermes/agent-hooks/evolution_post_llm.py
+
+chmod +x ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py
+chmod +x ~/.hermes/agent-hooks/evolution_pre_llm.py
+chmod +x ~/.hermes/agent-hooks/evolution_post_llm.py
 ```
 
-Run a small task that has an obvious lesson:
+初始化数据库：
 
-```text
-帮我写一个简单说明：以后遇到 arXiv 论文任务，先确认标题和作者，再阅读正文。
+```bash
+python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py init-db
 ```
 
-Then run:
+然后把 `examples/config-snippet.yaml` 里的内容合并到你的 Hermes 配置。
+
+查看 Hermes 配置路径：
+
+```bash
+hermes config path
+```
+
+合并后运行：
+
+```bash
+hermes hooks doctor
+```
+
+## 安装到其他 Hermes 目录
+
+Hermes 支持不同 profile。你可以通过 `HERMES_HOME` 指定安装位置：
+
+```bash
+HERMES_HOME=/path/to/.hermes ./install.sh
+```
+
+也可以指定配置文件：
+
+```bash
+HERMES_CONFIG=/path/to/config.yaml ./install.sh
+```
+
+只复制文件、不修改配置：
+
+```bash
+./install.sh --no-config
+```
+
+## 命令说明
+
+### 查看报告
+
+Hermes 里输入：
 
 ```text
 /evo-report
 ```
 
-If the hook and model ran successfully, you should see at least one rule or a log entry in:
+命令行直接运行：
 
-```text
-~/.hermes/evolution-system/logs/auto_critique.log
+```bash
+python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report
 ```
 
-## Publishing Checklist
+### 输出 JSON 报告
 
-Before pushing this repository to GitHub:
+Hermes 里输入：
+
+```text
+/evo-report-json
+```
+
+命令行直接运行：
+
+```bash
+python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report --json
+```
+
+### 备份数据库
+
+Hermes 里输入：
+
+```text
+/evo-backup
+```
+
+备份会放在：
+
+```text
+~/.hermes/evolution-system/backups/
+```
+
+### 清理低质量规则
+
+Hermes 里输入：
+
+```text
+/evo-clean
+```
+
+它会删除 `confidence < 0.1` 的规则。
+
+### 合并相似规则
+
+Hermes 里输入：
+
+```text
+/evo-reconcile
+```
+
+当规则变多后，可以偶尔运行一次。
+
+## 模型选择
+
+这个系统默认读取 Hermes 当前配置里的模型。
+
+如果你用的是本地模型，例如 Ollama，那么审计过程也会调用你的本地模型。
+
+如果你觉得任务结束后卡顿，通常是因为 post hook 又调用了一次大模型。可以换一个小一点的模型专门做规则总结：
+
+```bash
+export EVOLUTION_MODEL=qwen3:8b
+export EVOLUTION_BASE_URL=http://127.0.0.1:11434/v1
+```
+
+也可以在命令里临时指定：
+
+```bash
+python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py auto-critique \
+  --user-message "debug a failing test" \
+  --assistant-response "fixed the fixture and verified the test" \
+  --model "qwen3:8b" \
+  --base-url "http://127.0.0.1:11434/v1" \
+  --json
+```
+
+## 安全和隐私
+
+这个项目会给 Hermes 添加 shell hooks。意思是：Hermes 在任务开始前和结束后，会运行本地 Python 脚本。
+
+安装前建议你看这三个文件：
+
+```text
+scripts/evolution_memory.py
+hooks/evolution_pre_llm.py
+hooks/evolution_post_llm.py
+```
+
+这个项目默认把数据放在本地：
+
+```text
+~/.hermes/evolution-system/
+```
+
+它不会主动上传 `memory.db`。
+
+但要注意：post hook 会把“任务内容”和“最终回答”发给你配置的模型做审计。如果你的模型是远程 API，这些内容会发到远程服务。如果你处理敏感内容，建议使用本地模型，或者关闭 post hook。
+
+关闭 post hook 的方法：从 Hermes 配置里移除这一段：
+
+```yaml
+hooks:
+  post_llm_call:
+    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
+      timeout: 90
+```
+
+## 性能说明
+
+任务开始前的检索通常很快，因为只是查 SQLite。
+
+任务结束后的审计可能慢，因为它会调用模型总结规则。
+
+如果你觉得慢，可以：
+
+1. 给 `EVOLUTION_MODEL` 设置一个小模型。
+2. 增大 hook timeout。
+3. 暂时关闭 post hook。
+4. 只保留 `/evo-report` 和手动命令。
+
+## 常见问题
+
+### `/evo-report` 不存在
+
+先确认配置：
+
+```bash
+hermes config path
+```
+
+然后看配置里是否有 `evo-report`。
+
+如果没有，重新运行：
+
+```bash
+./install.sh
+```
+
+或者手动合并：
+
+```text
+examples/config-snippet.yaml
+```
+
+### `hermes hooks doctor` 提示 hook 未批准
+
+运行：
+
+```bash
+hermes hooks doctor
+```
+
+按提示批准。
+
+无交互环境可以用：
+
+```bash
+hermes --accept-hooks hooks doctor
+```
+
+### hook 超时
+
+通常是模型太慢。
+
+可以换小模型：
+
+```bash
+export EVOLUTION_MODEL=qwen3:8b
+```
+
+也可以把配置里的 `post_llm_call` timeout 从 `90` 改大：
+
+```yaml
+hooks:
+  post_llm_call:
+    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
+      timeout: 180
+```
+
+### 规则太泛
+
+运行：
+
+```text
+/evo-reconcile
+```
+
+然后再看：
+
+```text
+/evo-report
+```
+
+规则质量和你使用的模型有关。更好的模型通常能提炼出更具体的规则。
+
+### 想直接看数据库
+
+```bash
+sqlite3 ~/.hermes/evolution-system/memory.db '.tables'
+sqlite3 ~/.hermes/evolution-system/memory.db 'select id, domain_tag, confidence, rule_learned from memories order by id desc limit 10;'
+```
+
+## 卸载
+
+删除安装文件：
+
+```bash
+rm -rf ~/.hermes/skills/minimal-evolution-system
+rm -f ~/.hermes/agent-hooks/evolution_pre_llm.py
+rm -f ~/.hermes/agent-hooks/evolution_post_llm.py
+```
+
+从 `~/.hermes/config.yaml` 删除这些配置：
+
+```yaml
+quick_commands:
+  evo-report:
+  evo-report-json:
+  evo-backup:
+  evo-clean:
+  evo-reconcile:
+
+hooks:
+  pre_llm_call:
+    - command: python3 ~/.hermes/agent-hooks/evolution_pre_llm.py
+  post_llm_call:
+    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
+```
+
+数据目录默认保留：
+
+```text
+~/.hermes/evolution-system/
+```
+
+如果你确定不需要历史规则，可以删除：
+
+```bash
+rm -rf ~/.hermes/evolution-system
+```
+
+## 发布前检查
+
+如果你要 fork 或二次发布，建议先跑：
 
 ```bash
 python3 -m py_compile scripts/evolution_memory.py hooks/evolution_pre_llm.py hooks/evolution_post_llm.py
@@ -689,13 +622,13 @@ python3 -m py_compile scripts/evolution_memory.py hooks/evolution_pre_llm.py hoo
 find . -name '__pycache__' -o -name '*.pyc' -o -name '*.db'
 ```
 
-Do not commit:
+不要提交：
 
 - `memory.db`
-- backups
-- logs
-- personal config files
-- session files
+- 日志
+- 备份数据库
+- 个人 Hermes 配置
+- 会话记录
 
 ## License
 
