@@ -1,0 +1,24 @@
+quick_commands:
+  evo-report:
+    type: exec
+    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report
+  evo-report-json:
+    type: exec
+    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py report --json
+  evo-backup:
+    type: exec
+    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py backup
+  evo-clean:
+    type: exec
+    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py cleanup
+  evo-reconcile:
+    type: exec
+    command: python3 ~/.hermes/skills/minimal-evolution-system/scripts/evolution_memory.py reconcile
+
+hooks:
+  pre_llm_call:
+    - command: python3 ~/.hermes/agent-hooks/evolution_pre_llm.py
+      timeout: 30
+  post_llm_call:
+    - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
+      timeout: 90

@@ -1,0 +1,14 @@
+DB: /home/user/.hermes/evolution-system/memory.db
+总规则数: 5
+高质量规则数(confidence>0.7): 0
+低质量待淘汰规则数(confidence<0.1): 0
+近7天新增规则数: 5
+
+领域分布:
+- research: 3 条，平均置信度 0.6333
+- coding: 1 条，平均置信度 0.5
+- tool_use: 1 条，平均置信度 0.5
+
+复用最多的规则:
+- [id=4] [domain=research] use_count=4 confidence=0.7: 在搜索品牌名影视时，必须添加副标题或年份限定词
+- [id=5] [domain=research] use_count=4 confidence=0.7: 当遇到可能引起歧义的术语时，应优先使用更精确的关键词组合和替代信息源进行交叉验证
