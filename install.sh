@@ -109,7 +109,7 @@ def upsert_hook(event: str, command: str, timeout: int) -> None:
     hooks[event] = filtered
 
 upsert_hook("pre_llm_call", f"python3 {pre}", 30)
-upsert_hook("post_llm_call", f"python3 {post}", 90)
+upsert_hook("post_llm_call", f"python3 {post}", 150)
 
 config_path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False, width=100000), encoding="utf-8")
 PY

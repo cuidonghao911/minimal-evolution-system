@@ -19,9 +19,9 @@ For example, you tell it: "Before reading a paper, confirm the title and authors
 
 Minimal Evolution System is built for that gap.
 
-它不训练模型，也不改变模型参数。它只是给 Hermes 加一层很朴素的“经验本”：每次任务结束后，让 Agent 总结一条以后还会用得上的规则，存到本地 SQLite 数据库里；下次遇到相似任务时，再把相关规则提前拿出来提醒它。
+它不训练模型，也不改变模型参数。它只是给 Hermes 加一层很朴素的“经验本”：每次任务结束后，让 Agent 总结一条以后还会用得上的规则，并保存这条规则来自哪次任务、什么失败现场、什么反事实做法；下次遇到相似任务时，再把相关规则和证据提前拿出来提醒它。
 
-It does not train the model or change model weights. It adds a simple "experience notebook" to Hermes: after a task finishes, the agent extracts one reusable rule, stores it in a local SQLite database, and retrieves relevant rules before a similar future task.
+It does not train the model or change model weights. It adds a simple "experience notebook" to Hermes: after a task finishes, the agent extracts one reusable rule and stores where that rule came from, what failed, and what would have worked instead. Before a similar future task, it retrieves the relevant rule together with supporting evidence.
 
 一句话：
 
@@ -136,8 +136,8 @@ Minimal Evolution System is not:
 
 It is closer to a small experience ledger:
 
-- 记录规则。
-  Record rules.
+- 记录规则和错误现场。
+  Record rules and the failure episodes behind them.
 - 按任务匹配规则。
   Match rules to tasks.
 - 根据使用结果调整规则置信度。
@@ -403,9 +403,13 @@ The database is a local SQLite file:
 ~/.hermes/evolution-system/memory.db
 ```
 
-里面主要保存这些字段：
+里面主要有两类记录：
 
-It stores fields such as:
+It mainly stores two kinds of records:
+
+第一类是 `memories`，也就是下次要复用的规则：
+
+The first kind is `memories`, the reusable rules for future tasks:
 
 - `domain_tag`：规则属于哪个领域，比如 `coding`、`research`、`writing`。
   The domain of the rule, such as `coding`, `research`, or `writing`.
@@ -419,6 +423,25 @@ It stores fields such as:
   Confidence score from 0 to 1.
 - `use_count`：这条规则被取出来用过几次。
   How many times the rule has been retrieved.
+
+第二类是 `episodes`，也就是规则背后的错误现场：
+
+The second kind is `episodes`, the failure episodes behind the rules:
+
+- `task`：当时用户让 Agent 做什么。
+  What the user asked the agent to do.
+- `result`：当时 Agent 最终给出的结果摘要。
+  A summary of the final result.
+- `root_cause`：最可能的失败根因。
+  The most likely root cause.
+- `counterfactual`：如果重来一次，更好的做法是什么。
+  What should have been done instead.
+- `evidence`：过程证据，例如慢工具、错误路径、文件写入审计。
+  Process evidence, such as slow tools, wrong paths, or file-write audit results.
+
+这样做的目的，是避免系统只记住一句抽象规则，却忘了这条规则是从哪个失败场景里来的。
+
+This prevents the system from remembering only an abstract rule while forgetting the failure case that created it.
 
 ### 2. 任务开始前的 hook / Before-Task Hook
 
@@ -442,8 +465,10 @@ It does three simple things:
    Read the current user task.
 2. 去 SQLite 里找相关规则。
    Search SQLite for relevant rules.
-3. 把匹配到的规则注入到本轮上下文。
-   Inject matching rules into the current context.
+3. 找到这些规则最近一次对应的错误现场。
+   Find the latest failure episode behind those rules.
+4. 把匹配到的规则和证据注入到本轮上下文。
+   Inject matching rules and evidence into the current context.
 
 如果它失败了，会返回空结果，不影响 Hermes 正常回答。
 
@@ -475,8 +500,10 @@ It does the following:
    Ask your configured model to audit the task briefly.
 4. 提炼一条未来可复用规则。
    Extract one future-facing reusable rule.
-5. 存入 SQLite。
-   Store it in SQLite.
+5. 把规则存入 `memories`。
+   Store the rule in `memories`.
+6. 把本次错误现场、根因、反事实和过程证据存入 `episodes`。
+   Store the failure episode, root cause, counterfactual, and process evidence in `episodes`.
 
 这一步可能会慢一点，因为它需要再调用一次模型。
 

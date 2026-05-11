@@ -41,6 +41,7 @@ def main() -> int:
 
     data = json.loads(result.stdout or "{}")
     prompt_block = (data.get("prompt_block") or "").strip()
+    evidence_block = (data.get("evidence_block") or "").strip()
     if not prompt_block or prompt_block == "无历史规则。":
         print("{}")
         return 0
@@ -50,6 +51,12 @@ def main() -> int:
         "Use them when relevant, but current user instructions and verified facts take precedence:\n"
         f"{prompt_block}"
     )
+    if evidence_block:
+        context += (
+            "\n\nThe following evidence explains where some rules came from. "
+            "Use it to avoid blindly applying a rule outside its original failure mode:\n"
+            f"{evidence_block}"
+        )
     print(json.dumps({"context": context}, ensure_ascii=False))
     return 0
 

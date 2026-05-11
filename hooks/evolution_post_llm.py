@@ -148,13 +148,14 @@ def main() -> int:
     file_audit = file_claim_audit(str(assistant_response))
     critique_response = str(assistant_response)
     audit_parts = [part for part in [trace, file_audit] if part]
+    process_evidence = shorten("\n\n".join(audit_parts), 8000)
     if audit_parts:
         critique_response = (
             f"Final answer:\n{assistant_response}\n\n"
             "Audit the final answer together with the process evidence below. "
             "If the process shows a wrong guess, repeated slow tool, ignored constraint, "
             "or claimed file write with a missing file, extract a future-facing rule.\n"
-            + "\n\n".join(audit_parts)
+            + process_evidence
         )
 
     cmd = [
@@ -171,9 +172,11 @@ def main() -> int:
         "120",
         "--json",
     ]
+    if process_evidence:
+        cmd.extend(["--process-evidence", process_evidence])
     if success is not None:
         cmd.extend(["--success", str(success)])
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=90)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=150)
     if result.returncode != 0:
         log_line(f"auto-critique failed: {result.stderr.strip() or result.stdout.strip()}")
         return 0

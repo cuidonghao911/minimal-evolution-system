@@ -21,4 +21,4 @@ hooks:
       timeout: 30
   post_llm_call:
     - command: python3 ~/.hermes/agent-hooks/evolution_post_llm.py
-      timeout: 90
+      timeout: 150

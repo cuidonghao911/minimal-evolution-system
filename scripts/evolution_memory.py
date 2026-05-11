@@ -42,6 +42,25 @@ CREATE INDEX IF NOT EXISTS idx_memories_domain_tag ON memories(domain_tag);
 CREATE INDEX IF NOT EXISTS idx_memories_confidence ON memories(confidence);
 CREATE INDEX IF NOT EXISTS idx_memories_rule_learned ON memories(rule_learned);
 
+CREATE TABLE IF NOT EXISTS episodes (
+  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+  memory_id               INTEGER,
+  session_id              TEXT,
+  task                    TEXT    NOT NULL,
+  result                  TEXT,
+  success                 INTEGER,
+  root_cause              TEXT,
+  counterfactual          TEXT,
+  falsification_condition TEXT,
+  evidence                TEXT,
+  created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(memory_id) REFERENCES memories(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_episodes_memory_id ON episodes(memory_id);
+CREATE INDEX IF NOT EXISTS idx_episodes_session_id ON episodes(session_id);
+CREATE INDEX IF NOT EXISTS idx_episodes_created_at ON episodes(created_at);
+
 CREATE VIEW IF NOT EXISTS stale_memories AS
   SELECT * FROM memories
   WHERE confidence < 0.1
@@ -221,6 +240,18 @@ def format_memories_for_prompt(rows: list[MemoryRow]) -> str:
     return "\n".join(parts)
 
 
+def format_evidence_for_prompt(evidence_by_memory_id: dict[int, str], max_chars: int = 380) -> str:
+    lines = []
+    for memory_id, evidence in evidence_by_memory_id.items():
+        summary = normalize_whitespace(evidence)
+        if not summary:
+            continue
+        if len(summary) > max_chars:
+            summary = summary[: max_chars - 3] + "..."
+        lines.append(f"  evidence for id={memory_id}: {summary}")
+    return "\n".join(lines)
+
+
 def retrieve(task: str, top_k: int, session_id: str | None, as_json: bool) -> dict[str, Any]:
     task = normalize_whitespace(task)
     keywords = extract_keywords(task)
@@ -237,6 +268,33 @@ def retrieve(task: str, top_k: int, session_id: str | None, as_json: bool) -> di
                 matched.append(row)
 
         ranked = sorted(matched, key=lambda row: memory_score(row, task), reverse=True)[:top_k]
+        evidence_by_memory_id: dict[int, str] = {}
+        if ranked:
+            placeholders = ",".join("?" for _ in ranked)
+            episode_rows = conn.execute(
+                f"""
+                SELECT memory_id, root_cause, counterfactual, evidence
+                FROM episodes
+                WHERE memory_id IN ({placeholders})
+                ORDER BY created_at DESC
+                """,
+                tuple(row.id for row in ranked),
+            ).fetchall()
+            for episode in episode_rows:
+                memory_id = int(episode["memory_id"])
+                if memory_id in evidence_by_memory_id:
+                    continue
+                evidence_by_memory_id[memory_id] = normalize_whitespace(
+                    " | ".join(
+                        part
+                        for part in [
+                            f"root_cause={episode['root_cause']}" if episode["root_cause"] else "",
+                            f"counterfactual={episode['counterfactual']}" if episode["counterfactual"] else "",
+                            f"evidence={episode['evidence']}" if episode["evidence"] else "",
+                        ]
+                        if part
+                    )
+                )
         now = datetime.now().isoformat(timespec="seconds")
         for row in ranked:
             conn.execute(
@@ -264,6 +322,7 @@ def retrieve(task: str, top_k: int, session_id: str | None, as_json: bool) -> di
         "count": len(ranked),
         "memories": [row.__dict__ for row in ranked],
         "prompt_block": format_memories_for_prompt(ranked),
+        "evidence_block": format_evidence_for_prompt(evidence_by_memory_id),
     }
     if as_json:
         return payload
@@ -410,6 +469,7 @@ def store_critique(
     success: bool,
     critique_raw: str,
     session_id: str | None,
+    evidence: str | None = None,
     model: str | None = None,
     base_url: str | None = None,
     timeout: int = 90,
@@ -450,6 +510,26 @@ def store_critique(
             inserted = False
         else:
             rule_id, inserted = upsert_rule(conn, critique)
+        conn.execute(
+            """
+            INSERT INTO episodes (
+              memory_id, session_id, task, result, success, root_cause,
+              counterfactual, falsification_condition, evidence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rule_id,
+                state.get("session_id"),
+                task,
+                result,
+                1 if success else 0,
+                critique.get("root_cause"),
+                critique.get("counterfactual"),
+                critique.get("falsification_condition"),
+                normalize_whitespace(evidence or ""),
+            ),
+        )
         deleted = cleanup(conn)
         conn.commit()
 
@@ -465,6 +545,7 @@ def store_critique(
         "conflicted_rule_ids": critique.get("_conflicted_rule_ids", []),
         "deleted_stale": deleted,
         "session_id": state.get("session_id"),
+        "evidence_saved": bool(normalize_whitespace(evidence or "")),
     }
     audit_path = session_file(state.get("session_id", derive_session_id(task))).with_suffix(".last-critique.json")
     audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -476,6 +557,7 @@ def report(days: int, as_json: bool) -> dict[str, Any]:
         conn.executescript(SCHEMA_SQL)
         high_quality = conn.execute("SELECT COUNT(*) AS n FROM memories WHERE confidence > 0.7").fetchone()["n"]
         total = conn.execute("SELECT COUNT(*) AS n FROM memories").fetchone()["n"]
+        episodes = conn.execute("SELECT COUNT(*) AS n FROM episodes").fetchone()["n"]
         stale = conn.execute("SELECT COUNT(*) AS n FROM stale_memories").fetchone()["n"]
         recent = conn.execute(
             "SELECT COUNT(*) AS n FROM memories WHERE created_at > datetime('now', ?)",
@@ -501,6 +583,7 @@ def report(days: int, as_json: bool) -> dict[str, Any]:
     payload = {
         "db_path": str(DB_PATH),
         "total_rules": total,
+        "total_episodes": episodes,
         "high_quality_rules": high_quality,
         "stale_rules": stale,
         "recent_growth_days": days,
@@ -513,6 +596,7 @@ def report(days: int, as_json: bool) -> dict[str, Any]:
     lines = [
         f"DB: {payload['db_path']}",
         f"总规则数: {total}",
+        f"错误现场数/episodes: {episodes}",
         f"高质量规则数(confidence>0.7): {high_quality}",
         f"低质量待淘汰规则数(confidence<0.1): {stale}",
         f"近{days}天新增规则数: {recent}",
@@ -770,6 +854,7 @@ def auto_critique(
     assistant_response: str,
     session_id: str | None,
     success: str | None,
+    process_evidence: str | None,
     model: str | None,
     base_url: str | None,
     timeout: int,
@@ -811,6 +896,7 @@ def auto_critique(
         success=(str(success).lower() in {"1", "true", "yes", "y"}) if success is not None else bool(critique["confidence_delta"] > 0),
         critique_raw=json.dumps(critique, ensure_ascii=False),
         session_id=session_id,
+        evidence=process_evidence,
         model=model,
         base_url=base_url,
         timeout=timeout,
@@ -865,6 +951,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p_store.add_argument("--success", required=True)
     p_store.add_argument("--critique-json", required=True)
     p_store.add_argument("--session-id")
+    p_store.add_argument("--evidence")
 
     p_report = sub.add_parser("report", help="Show evolution metrics.")
     p_report.add_argument("--days", type=int, default=7)
@@ -881,6 +968,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p_auto.add_argument("--assistant-response", required=True)
     p_auto.add_argument("--session-id")
     p_auto.add_argument("--success")
+    p_auto.add_argument("--process-evidence")
     p_auto.add_argument("--model")
     p_auto.add_argument("--base-url")
     p_auto.add_argument("--timeout", type=int, default=90)
@@ -917,6 +1005,7 @@ def main(argv: list[str]) -> int:
             parse_success(args.success),
             args.critique_json,
             args.session_id,
+            evidence=args.evidence,
         )
     elif args.command == "report":
         payload = report(args.days, args.json)
@@ -933,6 +1022,7 @@ def main(argv: list[str]) -> int:
             assistant_response=args.assistant_response,
             session_id=args.session_id,
             success=args.success,
+            process_evidence=args.process_evidence,
             model=args.model,
             base_url=args.base_url,
             timeout=args.timeout,
